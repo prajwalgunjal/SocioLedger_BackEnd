@@ -1,4 +1,14 @@
 
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using RepositoryLayer.Context;
+using RepositoryLayer.Interface;
+using RepositoryLayer.Services;
+using System.Globalization;
+using System.Text;
+
 namespace SocioLedger
 {
     public class Program
@@ -7,13 +17,106 @@ namespace SocioLedger
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services to the container.
+            Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+            Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy("AllowAngularApp",
+                    builder => builder.WithOrigins("http://localhost:4200")
+                                      .AllowAnyHeader()
+                                      .AllowAnyMethod());
+            });
 
+            builder.Services.AddDbContext<SocioLedgerContext>(options => options.UseSqlServer(
+            builder.Configuration.GetConnectionString("DefaultConnection"),
+            sqlOptions =>
+            {
+                sqlOptions.EnableRetryOnFailure(
+                    maxRetryCount: 5,
+                    maxRetryDelay: TimeSpan.FromSeconds(30),
+                    errorNumbersToAdd: null
+                );
+            }
+            ).EnableSensitiveDataLogging()  // Remove in production
+            );
+            // Add services to the container.
+            builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+    });
             builder.Services.AddControllers();
+            // Configure Swagger/OpenAPI with JWT support
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo
+                {
+                    Title = "SocioLedger",
+                    Version = "v1",
+                    Description = "Prajwal Gunjal",
+                    Contact = new OpenApiContact
+                    {
+                        Name = "PrajwalGunjal",
+                        Email = "Prajwalgunjal8@gmail.com"
+                    }
+                });
+                // Define the JWT security scheme
+                var jwtSecurityScheme = new OpenApiSecurityScheme
+                {
+                    BearerFormat = "JWT",
+                    Name = "JWT Authentication",
+                    In = ParameterLocation.Header,
+                    Type = SecuritySchemeType.Http,
+                    Scheme = JwtBearerDefaults.AuthenticationScheme,
+                    Description = "Put **_ONLY_** your JWT Bearer token in the text box below!",
+
+                    Reference = new OpenApiReference
+                    {
+                        Id = JwtBearerDefaults.AuthenticationScheme,
+                        Type = ReferenceType.SecurityScheme
+                    }
+                };
+
+                c.AddSecurityDefinition(jwtSecurityScheme.Reference.Id, jwtSecurityScheme);
+
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    { jwtSecurityScheme, Array.Empty<string>() }
+                });
+            });
+
+            builder.Services.AddDbContext<SocioLedgerContext>(options =>
+            options.UseSqlServer(builder.Configuration["ConnectionStrings:DefaultConnection"])); // Note: Ensure your config section is correct
+            // Register Repositories
+            builder.Services.AddTransient<IUserRepo, UserRepo>();
+
+            builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+        };
+    });
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
+            builder.Services.AddDistributedMemoryCache();
+            builder.Logging.ClearProviders();
+            builder.Logging.AddConsole(); // Logs in terminal
+            builder.Logging.AddDebug();   // Logs in Visual Studio debug output
+            builder.Services.AddStackExchangeRedisCache(
+            options =>
+            {
+                options.Configuration = "localhost:6379";
+            });
 
+            builder.Services.AddSwaggerGen();
             var app = builder.Build();
 
             // Configure the HTTP request pipeline.
@@ -24,7 +127,8 @@ namespace SocioLedger
             }
 
             app.UseHttpsRedirection();
-
+            app.UseCors("AllowAngularApp");
+            app.UseAuthentication();
             app.UseAuthorization();
 
 

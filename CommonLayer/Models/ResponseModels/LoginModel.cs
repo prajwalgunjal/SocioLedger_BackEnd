@@ -6,10 +6,9 @@ using System.Threading.Tasks;
 
 namespace CommonLayer.Models.ResponseModels
 {
-    public class ResponseModel<T>
+    public class LoginModel
     {
-        public bool? Success { get; set; }
-        public string? Message { get; set; }
-        public T? Data { get; set; }
+        public required string Email { get; set; }
+        public required string Password { get; set; }
     }
 }
